@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Events, ActivityType, PresenceStatusData } from 'discord.js';
+import { Client, GatewayIntentBits, Events, ActivityType, PresenceStatusData, OAuth2Scopes } from 'discord.js';
 import { storage } from '../storage';
 import type { InsertBotStats, InsertBotGuild, InsertChatMessage } from '@shared/schema';
 
@@ -153,7 +153,7 @@ export class DiscordBotService {
       if (!guild) return { success: false, error: 'Guild not found' };
 
       const inviteUrl = client.generateInvite({
-        scopes: ['bot'],
+        scopes: [OAuth2Scopes.Bot],
         permissions: permissions ? BigInt(permissions) : undefined,
       });
 

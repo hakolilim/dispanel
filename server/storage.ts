@@ -58,6 +58,8 @@ export class MemStorage implements IStorage {
   async createBotSession(session: InsertBotSession): Promise<BotSession> {
     const botSession: BotSession = {
       ...session,
+      botDiscriminator: session.botDiscriminator ?? null,
+      isActive: session.isActive ?? null,
       id: this.currentId++,
       createdAt: new Date(),
       lastActiveAt: new Date(),
@@ -83,6 +85,8 @@ export class MemStorage implements IStorage {
   async createBotMessage(message: InsertBotMessage): Promise<BotMessage> {
     const botMessage: BotMessage = {
       ...message,
+      success: message.success ?? null,
+      errorMessage: message.errorMessage ?? null,
       id: this.currentId++,
       sentAt: new Date(),
     };
@@ -101,6 +105,10 @@ export class MemStorage implements IStorage {
   async createBotGuild(guild: InsertBotGuild): Promise<BotGuild> {
     const botGuild: BotGuild = {
       ...guild,
+      guildIcon: guild.guildIcon ?? null,
+      memberCount: guild.memberCount ?? null,
+      permissions: guild.permissions ?? null,
+      isActive: guild.isActive ?? null,
       id: this.currentId++,
       joinedAt: new Date(),
     };
@@ -136,6 +144,12 @@ export class MemStorage implements IStorage {
   async createBotStats(stats: InsertBotStats): Promise<BotStats> {
     const botStats: BotStats = {
       ...stats,
+      ping: stats.ping ?? null,
+      uptime: stats.uptime ?? null,
+      memoryUsage: stats.memoryUsage ?? null,
+      guildCount: stats.guildCount ?? null,
+      userCount: stats.userCount ?? null,
+      status: stats.status ?? "online",
       id: this.currentId++,
       recordedAt: new Date(),
     };
@@ -151,6 +165,7 @@ export class MemStorage implements IStorage {
   async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
     const chatMessage: ChatMessage = {
       ...message,
+      isFromBot: message.isFromBot ?? null,
       id: this.currentId++,
       timestamp: new Date(),
     };
