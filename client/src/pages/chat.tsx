@@ -15,7 +15,7 @@ import { useWebSocket } from '@/hooks/use-websocket';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
 import { formatTime, generateGuildIconFallback } from '@/lib/utils';
-import { Hash, Users, Send, Settings, AtSign, Volume2, VolumeX } from 'lucide-react';
+import { Hash, Users, Send, Settings, AtSign, Volume2, VolumeX, FileText } from 'lucide-react';
 
 interface Guild {
   guildId: string;
@@ -33,6 +33,33 @@ interface Channel {
   parentId?: string;
 }
 
+interface Attachment {
+  id: string;
+  url: string;
+  proxyUrl: string | null;
+  name: string;
+  contentType: string | null;
+  width: number | null;
+  height: number | null;
+  size: number;
+}
+
+interface EmbedImage {
+  url: string;
+  proxyUrl?: string | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+interface Embed {
+  type?: string;
+  url?: string | null;
+  title?: string | null;
+  description?: string | null;
+  image?: EmbedImage | null;
+  thumbnail?: EmbedImage | null;
+}
+
 interface Message {
   id: string;
   content: string;
@@ -45,6 +72,8 @@ interface Message {
   timestamp: string;
   channelId: string;
   guildId?: string;
+  attachments?: Attachment[];
+  embeds?: Embed[];
 }
 
 export default function ChatPage() {
@@ -407,9 +436,72 @@ export default function ChatPage() {
                                     </span>
                                   </div>
                                 )}
-                                <div className="text-[#dcddde] break-words">
-                                  {message.content}
-                                </div>
+                                {message.content && (
+                                  <div className="text-[#dcddde] break-words whitespace-pre-wrap">
+                                    {message.content}
+                                  </div>
+                                )}
+
+                                {/* Image & file attachments */}
+                                {message.attachments && message.attachments.length > 0 && (
+                                  <div className="mt-2 flex flex-col gap-2">
+                                    {message.attachments.map((attachment) =>
+                                      attachment.contentType?.startsWith('image/') ? (
+                                        <a
+                                          key={attachment.id}
+                                          href={attachment.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="block w-fit"
+                                        >
+                                          <img
+                                            src={attachment.proxyUrl || attachment.url}
+                                            alt={attachment.name}
+                                            className="max-w-sm max-h-80 rounded-lg border border-[#202225] object-contain"
+                                            loading="lazy"
+                                          />
+                                        </a>
+                                      ) : (
+                                        <a
+                                          key={attachment.id}
+                                          href={attachment.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="flex items-center gap-2 w-fit max-w-sm px-3 py-2 rounded-lg bg-[#2f3136] border border-[#202225] text-sm text-[#00a8fc] hover:bg-[#34373c] transition-colors"
+                                        >
+                                          <FileText className="w-4 h-4 flex-shrink-0" />
+                                          <span className="truncate">{attachment.name}</span>
+                                        </a>
+                                      )
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Embedded images (link previews / bot embeds) */}
+                                {message.embeds && message.embeds.length > 0 && (
+                                  <div className="mt-2 flex flex-col gap-2">
+                                    {message.embeds.map((embed, embedIndex) => {
+                                      const embedImage = embed.image || embed.thumbnail;
+                                      if (!embedImage) return null;
+                                      return (
+                                        <a
+                                          key={embedIndex}
+                                          href={embed.url || embedImage.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="block w-fit"
+                                        >
+                                          <img
+                                            src={embedImage.proxyUrl || embedImage.url}
+                                            alt={embed.title || 'embed image'}
+                                            className="max-w-sm max-h-80 rounded-lg border border-[#202225] object-contain"
+                                            loading="lazy"
+                                          />
+                                        </a>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );

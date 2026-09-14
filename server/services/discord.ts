@@ -241,6 +241,40 @@ export class DiscordBotService {
           timestamp: message.createdAt.toISOString(),
           channelId: message.channelId,
           guildId: message.guildId,
+          // Attachments (images, files, videos, etc.) uploaded with the message
+          attachments: message.attachments.map(attachment => ({
+            id: attachment.id,
+            url: attachment.url,
+            proxyUrl: attachment.proxyURL,
+            name: attachment.name,
+            contentType: attachment.contentType,
+            width: attachment.width,
+            height: attachment.height,
+            size: attachment.size,
+          })),
+          // Rich embeds (link previews, bot embeds) that may contain images
+          embeds: message.embeds.map(embed => ({
+            type: embed.data.type,
+            url: embed.url,
+            title: embed.title,
+            description: embed.description,
+            image: embed.image
+              ? {
+                  url: embed.image.url,
+                  proxyUrl: embed.image.proxyURL,
+                  width: embed.image.width,
+                  height: embed.image.height,
+                }
+              : null,
+            thumbnail: embed.thumbnail
+              ? {
+                  url: embed.thumbnail.url,
+                  proxyUrl: embed.thumbnail.proxyURL,
+                  width: embed.thumbnail.width,
+                  height: embed.thumbnail.height,
+                }
+              : null,
+          })),
         }))
         .reverse(); // Reverse to show oldest first
 
