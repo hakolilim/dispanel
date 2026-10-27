@@ -117,11 +117,12 @@ npm start
 
 ### 🔒 Production Security Configuration
 
-Copy `.env.example` and configure the deployment environment. Production startup requires a unique `SESSION_SECRET` containing at least 32 characters and HTTPS so the secure session cookie can be sent.
+Copy `.env.example` to `.env` and configure it. The server and Drizzle automatically load this file; variables already exported by the operating system retain precedence. A unique `SESSION_SECRET` containing at least 32 characters is strongly recommended for stable production sessions. If omitted, the server generates a secure ephemeral secret and invalidates sessions whenever it restarts. Cookies automatically use the `Secure` attribute when served over HTTPS.
 
 ```bash
-export SESSION_SECRET="$(openssl rand -base64 48)"
-export PUBLIC_ORIGIN="https://panel.example.com"
+cp .env.example .env
+# Edit .env and replace SESSION_SECRET with the output of:
+openssl rand -base64 48
 npm run build
 npm start
 ```

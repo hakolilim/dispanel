@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import { config as loadEnv } from "dotenv";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import { randomBytes } from "crypto";
@@ -8,8 +9,14 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic } from "./vite";
 import { log } from "./logger";
 
+loadEnv({ quiet: true });
+
 const app = express();
 const isProduction = app.get("env") === "production";
+const configuredPublicOrigin = process.env.PUBLIC_ORIGIN
+  ? new URL(process.env.PUBLIC_ORIGIN).origin
+  : undefined;
+const usesHttps = configuredPublicOrigin?.startsWith("https://") ?? false;
 
 if (isProduction) {
   app.set("trust proxy", 1);
@@ -32,7 +39,7 @@ app.use(helmet({
       }
     : false,
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  strictTransportSecurity: isProduction ? undefined : false,
+  strictTransportSecurity: isProduction && usesHttps ? undefined : false,
 }));
 
 app.use("/api", (req, res, next) => {
@@ -46,8 +53,8 @@ app.use("/api", (req, res, next) => {
   }
 
   try {
-    const expectedOrigin = process.env.PUBLIC_ORIGIN
-      ? new URL(process.env.PUBLIC_ORIGIN).origin
+    const expectedOrigin = configuredPublicOrigin
+      ? configuredPublicOrigin
       : `${req.protocol}://${req.get("host")}`;
     if (new URL(origin).origin !== expectedOrigin) {
       return res.status(403).json({ error: "Cross-origin request denied" });
@@ -86,21 +93,25 @@ app.use(express.urlencoded({ extended: false, limit: "16kb", parameterLimit: 20 
 
 // Session configuration
 const configuredSessionSecret = process.env.SESSION_SECRET?.trim();
-if (isProduction && (!configuredSessionSecret || configuredSessionSecret.length < 32)) {
-  throw new Error("SESSION_SECRET must be set to at least 32 characters in production");
+if (configuredSessionSecret && configuredSessionSecret.length < 32) {
+  throw new Error("SESSION_SECRET must contain at least 32 characters when provided");
+}
+const sessionSecret = configuredSessionSecret || randomBytes(48).toString("base64url");
+if (isProduction && !configuredSessionSecret) {
+  console.warn("SESSION_SECRET is not set; using an ephemeral secret. Sessions will be invalidated when the server restarts.");
 }
 
 const MemStore = MemoryStore(session);
 app.use(session({
   name: "dispanel.sid",
-  secret: configuredSessionSecret || randomBytes(48).toString("base64url"),
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   store: new MemStore({
     checkPeriod: 86400000 // prune expired entries every 24h
   }),
   cookie: {
-    secure: isProduction,
+    secure: "auto",
     httpOnly: true,
     sameSite: "strict",
     path: "/",
