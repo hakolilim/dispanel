@@ -5,7 +5,6 @@ import { z } from "zod";
 export const botSessions = pgTable("bot_sessions", {
   id: serial("id").primaryKey(),
   botId: text("bot_id").notNull().unique(),
-  botToken: text("bot_token").notNull(),
   botUsername: text("bot_username").notNull(),
   botDiscriminator: text("bot_discriminator"),
   isActive: boolean("is_active").default(true),

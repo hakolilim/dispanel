@@ -15,51 +15,71 @@ export function useWebSocket(botId?: string) {
   useEffect(() => {
     if (!botId) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
+    let cancelled = false;
 
-    ws.onopen = () => {
-      console.log("WebSocket connected");
-      setIsConnected(true);
-      
-      // Authenticate with bot ID
-      ws.send(JSON.stringify({
-        type: "auth",
-        botId,
-      }));
-    };
-
-    ws.onmessage = (event) => {
+    const connect = async () => {
       try {
-        const message: WebSocketMessage = JSON.parse(event.data);
-        handleWebSocketMessage(message);
+        const ticketResponse = await fetch('/api/auth/ws-ticket', {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (!ticketResponse.ok) {
+          throw new Error('Unable to authorize WebSocket connection');
+        }
+
+        const { ticket } = await ticketResponse.json();
+        if (cancelled) return;
+
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ type: "auth", ticket }));
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const message: WebSocketMessage = JSON.parse(event.data);
+            if (message.type === 'auth_success') {
+              setIsConnected(true);
+            }
+            handleWebSocketMessage(message);
+          } catch (error) {
+            console.error("Failed to parse WebSocket message:", error);
+          }
+        };
+
+        ws.onclose = () => {
+          if (wsRef.current === ws) {
+            wsRef.current = null;
+          }
+          setIsConnected(false);
+        };
+
+        ws.onerror = () => {
+          setIsConnected(false);
+        };
       } catch (error) {
-        console.error("Failed to parse WebSocket message:", error);
+        if (!cancelled) {
+          console.error("WebSocket connection failed:", error);
+          setIsConnected(false);
+        }
       }
     };
 
-    ws.onclose = () => {
-      console.log("WebSocket disconnected");
-      setIsConnected(false);
-    };
-
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
-      setIsConnected(false);
-    };
+    connect();
 
     return () => {
-      ws.close();
+      cancelled = true;
+      wsRef.current?.close();
+      wsRef.current = null;
     };
   }, [botId]);
 
   const handleWebSocketMessage = (message: WebSocketMessage) => {
     switch (message.type) {
       case "auth_success":
-        console.log("WebSocket authenticated for bot:", message.botId);
         break;
         
       case "stats_update":
@@ -84,14 +104,7 @@ export function useWebSocket(botId?: string) {
     }
   };
 
-  const sendMessage = (message: WebSocketMessage) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message));
-    }
-  };
-
   return {
     isConnected,
-    sendMessage,
   };
 }

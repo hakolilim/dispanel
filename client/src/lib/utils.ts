@@ -78,6 +78,21 @@ export function copyToClipboard(text: string): Promise<void> {
   return navigator.clipboard.writeText(text);
 }
 
+export function safeHttpUrl(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === "https:") {
+      return value;
+    }
+  } catch {
+    // Invalid or relative external URLs are not rendered.
+  }
+
+  return undefined;
+}
+
 export function generateGuildIconFallback(guildName: string): string {
   const words = guildName.split(' ');
   if (words.length >= 2) {

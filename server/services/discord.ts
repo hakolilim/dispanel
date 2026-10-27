@@ -22,10 +22,19 @@ export class DiscordBotService {
       const botUser = client.user!;
       const botId = botUser.id;
 
+      const existingClient = this.clients.get(botId);
+      if (existingClient) {
+        existingClient.destroy();
+        const existingInterval = this.statsIntervals.get(botId);
+        if (existingInterval) {
+          clearInterval(existingInterval);
+          this.statsIntervals.delete(botId);
+        }
+      }
+
       // Store bot session
       await storage.createBotSession({
         botId,
-        botToken: token,
         botUsername: botUser.username,
         botDiscriminator: botUser.discriminator || '0000',
         isActive: true,
@@ -210,6 +219,36 @@ export class DiscordBotService {
       return { success: true, channels };
     } catch (error: any) {
       console.error('Get guild channels error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  async getGuildEmojis(botId: string, guildId: string): Promise<{ success: boolean; emojis?: any[]; error?: string }> {
+    try {
+      const client = this.clients.get(botId);
+      if (!client) {
+        return { success: false, error: 'Bot not connected' };
+      }
+
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) {
+        return { success: false, error: 'Guild not found' };
+      }
+
+      const guildEmojis = await guild.emojis.fetch();
+      const emojis = guildEmojis
+        .filter(emoji => emoji.available !== false && Boolean(emoji.name))
+        .map(emoji => ({
+          id: emoji.id,
+          name: emoji.name!,
+          animated: emoji.animated === true,
+          url: `https://cdn.discordapp.com/emojis/${emoji.id}.${emoji.animated ? 'gif' : 'webp'}?size=48&quality=lossless`,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      return { success: true, emojis };
+    } catch (error: any) {
+      console.error('Get guild emojis error:', error);
       return { success: false, error: error.message };
     }
   }

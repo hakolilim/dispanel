@@ -21,7 +21,6 @@ export function useAuth() {
 
       if (res.ok) {
         const data = await res.json();
-        console.log("Session check successful:", data);
         setAuthState({
           isAuthenticated: true,
           isLoading: false,
@@ -29,7 +28,6 @@ export function useAuth() {
         });
         return true;
       } else {
-        console.log("Session check failed:", res.status);
         setAuthState({
           isAuthenticated: false,
           isLoading: false,
@@ -38,7 +36,6 @@ export function useAuth() {
         return false;
       }
     } catch (error) {
-      console.log("Session check error:", error);
       setAuthState({
         isAuthenticated: false,
         isLoading: false,
@@ -49,6 +46,8 @@ export function useAuth() {
   }, []);
 
   useEffect(() => {
+    // Purge credentials saved by older versions, including for already-authenticated users.
+    localStorage.removeItem("discord_bot_token");
     // Check session once on mount
     checkSession();
   }, [checkSession]);
@@ -65,22 +64,12 @@ export function useAuth() {
       const data = await res.json();
 
       if (data.success && res.ok) {
-        console.log("Login successful, updating auth state for bot:", data.bot.id);
-        
-        // Force immediate state update
-        setAuthState(prevState => {
-          console.log("Auth state update - prev:", prevState, "new:", {
-            isAuthenticated: true,
-            isLoading: false,
-            botId: data.bot.id,
-          });
-          return {
-            isAuthenticated: true,
-            isLoading: false,
-            botId: data.bot.id,
-          };
+        setAuthState({
+          isAuthenticated: true,
+          isLoading: false,
+          botId: data.bot.id,
         });
-        
+
         return { success: true, bot: data.bot };
       } else {
         return { success: false, error: data.error };

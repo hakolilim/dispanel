@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import type { CustomEmoji, EmojiClickData } from 'emoji-picker-react';
 import { useAuth } from '@/hooks/use-auth';
 import { Header } from '@/components/layout/header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,12 +11,16 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { DiscordMessageContent } from '@/components/discord-message-content';
 import { useToast } from '@/hooks/use-toast';
 import { useWebSocket } from '@/hooks/use-websocket';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '@/lib/queryClient';
-import { formatTime, generateGuildIconFallback } from '@/lib/utils';
-import { Hash, Users, Send, Settings, AtSign, Volume2, VolumeX, FileText } from 'lucide-react';
+import { formatTime, generateGuildIconFallback, safeHttpUrl } from '@/lib/utils';
+import { Hash, Send, Smile, Volume2, FileText } from 'lucide-react';
+
+const EmojiPicker = lazy(() => import('emoji-picker-react'));
 
 interface Guild {
   guildId: string;
@@ -76,11 +81,23 @@ interface Message {
   embeds?: Embed[];
 }
 
+interface GuildEmoji {
+  id: string;
+  name: string;
+  animated: boolean;
+  url: string;
+}
+
+interface GuildEmojisResponse {
+  success: boolean;
+  emojis: GuildEmoji[];
+}
+
 export default function ChatPage() {
   const { isAuthenticated, botId } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { sendMessage: sendWebSocketMessage } = useWebSocket(botId || undefined);
+  useWebSocket(botId || undefined);
   
   const [selectedGuild, setSelectedGuild] = useState<string>('');
   const [selectedChannel, setSelectedChannel] = useState<string>('');
@@ -89,8 +106,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoadingChannels, setIsLoadingChannels] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const selectionRef = useRef({ start: 0, end: 0 });
 
   // Fetch guilds
   const { data: guildsData } = useQuery({
@@ -99,12 +119,45 @@ export default function ChatPage() {
   });
 
   const guilds: Guild[] = (guildsData as any)?.guilds || [];
+  const selectedGuildData = guilds.find(g => g.guildId === selectedGuild);
+
+  const {
+    data: guildEmojisData,
+    isLoading: isLoadingEmojis,
+    isError: hasEmojiError,
+  } = useQuery<GuildEmojisResponse>({
+    queryKey: ['/api/bot/guilds', selectedGuild, 'emojis'],
+    enabled: !!selectedGuild,
+    queryFn: async () => {
+      const response = await fetch(`/api/bot/guilds/${selectedGuild}/emojis`, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load server emojis');
+      }
+
+      return response.json();
+    },
+  });
+
+  const customEmojis = useMemo<CustomEmoji[]>(() => {
+    const group = selectedGuildData?.guildName || 'Server emojis';
+    return (guildEmojisData?.emojis || []).map(emoji => ({
+      id: emoji.id,
+      names: [emoji.name],
+      imgUrl: emoji.url,
+      group,
+    }));
+  }, [guildEmojisData?.emojis, selectedGuildData?.guildName]);
 
   // Fetch channels for selected guild
   useEffect(() => {
+    setSelectedChannel('');
+    setChannels([]);
+    setIsEmojiPickerOpen(false);
+
     if (!selectedGuild) {
-      setChannels([]);
-      setSelectedChannel('');
       return;
     }
 
@@ -200,6 +253,7 @@ export default function ChatPage() {
     },
     onSuccess: () => {
       setMessageContent('');
+      selectionRef.current = { start: 0, end: 0 };
       toast({
         title: "Message sent",
         description: "Your message has been sent successfully",
@@ -252,8 +306,46 @@ export default function ChatPage() {
     });
   };
 
-  const selectedGuildData = guilds.find(g => g.guildId === selectedGuild);
   const selectedChannelData = channels.find(c => c.id === selectedChannel);
+
+  const rememberSelection = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    selectionRef.current = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+    };
+  };
+
+  const insertEmoji = (emojiData: EmojiClickData) => {
+    let valueToInsert = emojiData.emoji;
+
+    if (emojiData.isCustom) {
+      const guildEmoji = guildEmojisData?.emojis.find(emoji => emoji.id === emojiData.unified);
+      if (!guildEmoji) return;
+
+      valueToInsert = `<${guildEmoji.animated ? 'a' : ''}:${guildEmoji.name}:${guildEmoji.id}>`;
+    }
+
+    const { start, end } = selectionRef.current;
+    setMessageContent(current => (
+      current.slice(0, start) + valueToInsert + current.slice(end)
+    ));
+
+    const nextPosition = start + valueToInsert.length;
+    selectionRef.current = { start: nextPosition, end: nextPosition };
+  };
+
+  const restoreTextareaFocus = () => {
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      textarea.focus();
+      textarea.setSelectionRange(selectionRef.current.start, selectionRef.current.end);
+    });
+  };
 
   // Group channels by category
   const textChannels = channels.filter(c => c.type === 0).sort((a, b) => a.position - b.position);
@@ -437,25 +529,29 @@ export default function ChatPage() {
                                   </div>
                                 )}
                                 {message.content && (
-                                  <div className="text-[#dcddde] break-words whitespace-pre-wrap">
-                                    {message.content}
-                                  </div>
+                                  <DiscordMessageContent
+                                    content={message.content}
+                                    className="text-[#dcddde]"
+                                  />
                                 )}
 
                                 {/* Image & file attachments */}
                                 {message.attachments && message.attachments.length > 0 && (
                                   <div className="mt-2 flex flex-col gap-2">
-                                    {message.attachments.map((attachment) =>
-                                      attachment.contentType?.startsWith('image/') ? (
+                                    {message.attachments.map((attachment) => {
+                                      const attachmentUrl = safeHttpUrl(attachment.url);
+                                      if (!attachmentUrl) return null;
+
+                                      return attachment.contentType?.startsWith('image/') ? (
                                         <a
                                           key={attachment.id}
-                                          href={attachment.url}
+                                          href={attachmentUrl}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="block w-fit"
                                         >
                                           <img
-                                            src={attachment.proxyUrl || attachment.url}
+                                            src={safeHttpUrl(attachment.proxyUrl) || attachmentUrl}
                                             alt={attachment.name}
                                             className="max-w-sm max-h-80 rounded-lg border border-[#202225] object-contain"
                                             loading="lazy"
@@ -464,7 +560,7 @@ export default function ChatPage() {
                                       ) : (
                                         <a
                                           key={attachment.id}
-                                          href={attachment.url}
+                                          href={attachmentUrl}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="flex items-center gap-2 w-fit max-w-sm px-3 py-2 rounded-lg bg-[#2f3136] border border-[#202225] text-sm text-[#00a8fc] hover:bg-[#34373c] transition-colors"
@@ -472,8 +568,8 @@ export default function ChatPage() {
                                           <FileText className="w-4 h-4 flex-shrink-0" />
                                           <span className="truncate">{attachment.name}</span>
                                         </a>
-                                      )
-                                    )}
+                                      );
+                                    })}
                                   </div>
                                 )}
 
@@ -483,16 +579,19 @@ export default function ChatPage() {
                                     {message.embeds.map((embed, embedIndex) => {
                                       const embedImage = embed.image || embed.thumbnail;
                                       if (!embedImage) return null;
+                                      const imageUrl = safeHttpUrl(embedImage.proxyUrl) || safeHttpUrl(embedImage.url);
+                                      if (!imageUrl) return null;
+                                      const targetUrl = safeHttpUrl(embed.url) || imageUrl;
                                       return (
                                         <a
                                           key={embedIndex}
-                                          href={embed.url || embedImage.url}
+                                          href={targetUrl}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="block w-fit"
                                         >
                                           <img
-                                            src={embedImage.proxyUrl || embedImage.url}
+                                            src={imageUrl}
                                             alt={embed.title || 'embed image'}
                                             className="max-w-sm max-h-80 rounded-lg border border-[#202225] object-contain"
                                             loading="lazy"
@@ -529,8 +628,13 @@ export default function ChatPage() {
               <form onSubmit={handleSendMessage} className="flex gap-2">
                 <div className="flex-1">
                   <Textarea
+                    ref={textareaRef}
                     value={messageContent}
                     onChange={(e) => setMessageContent(e.target.value)}
+                    onSelect={rememberSelection}
+                    onClick={rememberSelection}
+                    onKeyUp={rememberSelection}
+                    onBlur={rememberSelection}
                     placeholder={`Message #${selectedChannelData?.name || 'channel'}`}
                     className="min-h-[44px] max-h-32 bg-[#40444b] border-[#202225] text-white placeholder:text-[#72767d] resize-none"
                     onKeyDown={(e) => {
@@ -541,6 +645,58 @@ export default function ChatPage() {
                     }}
                   />
                 </div>
+                <Popover open={isEmojiPickerOpen} onOpenChange={setIsEmojiPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Choose an emoji"
+                      className="h-11 w-11 text-[#b9bbbe] hover:bg-[#40444b] hover:text-white"
+                      onMouseDown={rememberSelection}
+                    >
+                      <Smile className="h-5 w-5" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    side="top"
+                    align="end"
+                    className="w-auto overflow-hidden border-[#202225] bg-[#2f3136] p-0"
+                    onCloseAutoFocus={(event) => {
+                      event.preventDefault();
+                      restoreTextareaFocus();
+                    }}
+                  >
+                    {isLoadingEmojis && (
+                      <div className="border-b border-[#202225] px-3 py-2 text-xs text-[#b9bbbe]">
+                        Loading server emojis...
+                      </div>
+                    )}
+                    {hasEmojiError && (
+                      <div className="border-b border-[#202225] px-3 py-2 text-xs text-[#faa61a]">
+                        Server emojis are unavailable. Standard emojis still work.
+                      </div>
+                    )}
+                    <Suspense
+                      fallback={(
+                        <div className="flex h-[400px] w-[350px] items-center justify-center text-sm text-[#b9bbbe]">
+                          Loading emoji picker...
+                        </div>
+                      )}
+                    >
+                      <EmojiPicker
+                        colorScheme="dark"
+                        width={350}
+                        height={400}
+                        lazyLoadEmojis
+                        customEmojis={customEmojis}
+                        previewConfig={{ showPreview: false }}
+                        searchPlaceholder="Search emoji..."
+                        onEmojiClick={insertEmoji}
+                      />
+                    </Suspense>
+                  </PopoverContent>
+                </Popover>
                 <Button
                   type="submit"
                   disabled={!messageContent.trim() || sendMessageMutation.isPending}

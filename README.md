@@ -115,6 +115,19 @@ npm run build
 npm start
 ```
 
+### 🔒 Production Security Configuration
+
+Copy `.env.example` and configure the deployment environment. Production startup requires a unique `SESSION_SECRET` containing at least 32 characters and HTTPS so the secure session cookie can be sent.
+
+```bash
+export SESSION_SECRET="$(openssl rand -base64 48)"
+export PUBLIC_ORIGIN="https://panel.example.com"
+npm run build
+npm start
+```
+
+`PUBLIC_ORIGIN` is recommended and must match the public origin exactly. Discord bot tokens are used only to establish the active Discord connection; they are not persisted in browser storage or the application schema.
+
 ---
 
 ## 🧠 Tech Stack
@@ -142,7 +155,7 @@ npm start
 
 ## 🗃️ Database Tables
 
-* `bot_sessions`: Stores bot token sessions
+* `bot_sessions`: Stores non-secret bot session metadata
 * `bot_messages`: Logs message history
 * `bot_guilds`: Tracks bot’s guilds
 * `bot_stats`: Logs live statistics

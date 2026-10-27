@@ -4,14 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Shield, Bot } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function LoginPage() {
   const [token, setToken] = useState("");
-  const [rememberToken, setRememberToken] = useState(false);
   const [error, setError] = useState("");
   
   const { login } = useAuth();
@@ -33,10 +31,7 @@ export default function LoginPage() {
       const result = await login(token);
       
       if (result.success) {
-        if (rememberToken) {
-          localStorage.setItem("discord_bot_token", token);
-        }
-        
+        setToken("");
         toast({
           title: "Success!",
           description: `Connected to ${result.bot?.username}`,
@@ -55,15 +50,6 @@ export default function LoginPage() {
       setIsSubmitting(false);
     }
   };
-
-  // Auto-fill token from localStorage if available
-  useState(() => {
-    const savedToken = localStorage.getItem("discord_bot_token");
-    if (savedToken) {
-      setToken(savedToken);
-      setRememberToken(true);
-    }
-  });
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-discord-blurple/10 to-discord-pink/10 p-4">
@@ -92,17 +78,6 @@ export default function LoginPage() {
               />
             </div>
             
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="remember"
-                checked={rememberToken}
-                onCheckedChange={(checked) => setRememberToken(checked as boolean)}
-              />
-              <Label htmlFor="remember" className="text-sm">
-                Remember token (stored locally)
-              </Label>
-            </div>
-            
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
@@ -125,7 +100,7 @@ export default function LoginPage() {
                 Security Notice
               </p>
               <p className="text-yellow-700 dark:text-yellow-300 text-sm">
-                Your bot token is processed locally and never sent to third-party servers.
+                Your bot token is sent only to this server for Discord authentication and is never stored in the browser or application database.
               </p>
             </div>
           </Alert>

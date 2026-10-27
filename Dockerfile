@@ -11,11 +11,8 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Remove devDependencies, keep production node_modules for the runtime image
-# (the server bundle is built with --packages=external so deps are required at runtime).
-# NOTE: server/index.ts statically imports ./vite.ts which imports "vite", so vite
-# must remain installed even though it is a devDependency.
-RUN npm prune --omit=dev && npm install --no-save "vite@^5.4.19"
+# Remove devDependencies; Vite is loaded dynamically only in development.
+RUN npm prune --omit=dev
 
 # ---------- Runtime stage ----------
 FROM node:22-alpine

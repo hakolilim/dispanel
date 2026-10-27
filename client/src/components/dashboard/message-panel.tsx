@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Send } from "lucide-react";
 import { formatTime } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { DiscordMessageContent } from "@/components/discord-message-content";
 
 export function MessagePanel() {
   const [targetType, setTargetType] = useState<"channel" | "user">("channel");
@@ -147,7 +148,7 @@ export function MessagePanel() {
                         {formatTime(message.sentAt || new Date())}
                       </span>
                     </div>
-                    <p className="text-sm">{message.content}</p>
+                    <DiscordMessageContent content={message.content} className="text-sm" />
                     {message.success === false && (
                       <p className="text-xs text-destructive mt-1">
                         Failed: {message.errorMessage}

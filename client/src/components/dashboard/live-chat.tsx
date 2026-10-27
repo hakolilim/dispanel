@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Send } from "lucide-react";
 import { formatTime } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
+import { DiscordMessageContent } from "@/components/discord-message-content";
 
 export function LiveChat() {
   const [message, setMessage] = useState("");
@@ -78,7 +79,7 @@ export function LiveChat() {
                       {formatTime(msg.timestamp || new Date())}
                     </span>
                   </div>
-                  <p className="text-sm">{msg.content}</p>
+                  <DiscordMessageContent content={msg.content} className="text-sm" />
                 </div>
               </div>
             ))

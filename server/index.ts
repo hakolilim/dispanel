@@ -1,25 +1,110 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import MemoryStore from "memorystore";
+import { randomBytes } from "crypto";
+import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+import { setupVite, serveStatic } from "./vite";
+import { log } from "./logger";
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+const isProduction = app.get("env") === "production";
+
+if (isProduction) {
+  app.set("trust proxy", 1);
+}
+
+app.use(helmet({
+  contentSecurityPolicy: isProduction
+    ? {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:", "https:"],
+          connectSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"],
+          frameAncestors: ["'none'"],
+        },
+      }
+    : false,
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  strictTransportSecurity: isProduction ? undefined : false,
+}));
+
+app.use("/api", (req, res, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    return next();
+  }
+
+  const origin = req.get("origin");
+  if (!origin) {
+    return next();
+  }
+
+  try {
+    const expectedOrigin = process.env.PUBLIC_ORIGIN
+      ? new URL(process.env.PUBLIC_ORIGIN).origin
+      : `${req.protocol}://${req.get("host")}`;
+    if (new URL(origin).origin !== expectedOrigin) {
+      return res.status(403).json({ error: "Cross-origin request denied" });
+    }
+  } catch {
+    return res.status(403).json({ error: "Invalid request origin" });
+  }
+
+  next();
+});
+
+app.use("/api", rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+}));
+
+app.use("/api/auth/bot", rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+}));
+
+app.use(["/api/bot/message", "/api/bot/chat"], rateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+}));
+
+app.use(express.json({ limit: "16kb" }));
+app.use(express.urlencoded({ extended: false, limit: "16kb", parameterLimit: 20 }));
 
 // Session configuration
+const configuredSessionSecret = process.env.SESSION_SECRET?.trim();
+if (isProduction && (!configuredSessionSecret || configuredSessionSecret.length < 32)) {
+  throw new Error("SESSION_SECRET must be set to at least 32 characters in production");
+}
+
 const MemStore = MemoryStore(session);
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'discord-bot-panel-secret-key',
+  name: "dispanel.sid",
+  secret: configuredSessionSecret || randomBytes(48).toString("base64url"),
   resave: false,
   saveUninitialized: false,
   store: new MemStore({
     checkPeriod: 86400000 // prune expired entries every 24h
   }),
   cookie: {
-    secure: false, // Set to true in production with HTTPS
+    secure: isProduction,
     httpOnly: true,
+    sameSite: "strict",
+    path: "/",
+    priority: "high",
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 }));
@@ -27,27 +112,11 @@ app.use(session({
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
+      log(`${req.method} ${path} ${res.statusCode} in ${duration}ms`);
     }
   });
 
@@ -57,12 +126,16 @@ app.use((req, res, next) => {
 (async () => {
   const server = await registerRoutes(app);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) {
+      return next(err);
+    }
 
+    const status = err.status || err.statusCode || 500;
+    const message = status >= 500 ? "Internal Server Error" : (err.message || "Request failed");
+
+    console.error(err);
     res.status(status).json({ message });
-    throw err;
   });
 
   // importantly only setup vite in development and after
@@ -78,6 +151,9 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = 5000;
+  server.requestTimeout = 30_000;
+  server.headersTimeout = 15_000;
+  server.keepAliveTimeout = 5_000;
   server.listen({
     port,
     host: "0.0.0.0",
