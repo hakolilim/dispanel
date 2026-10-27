@@ -158,10 +158,12 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 5000;
+  const configuredPort = process.env.PORT?.trim();
+  const port = configuredPort ? Number(configuredPort) : 5000;
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("PORT must be an integer between 1 and 65535");
+  }
+
   server.requestTimeout = 30_000;
   server.headersTimeout = 15_000;
   server.keepAliveTimeout = 5_000;

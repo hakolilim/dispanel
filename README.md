@@ -127,6 +127,8 @@ npm run build
 npm start
 ```
 
+Set `PORT` in `.env` to change the HTTP port; it defaults to `5000` when omitted.
+
 `PUBLIC_ORIGIN` is recommended and must match the public origin exactly. Discord bot tokens are used only to establish the active Discord connection; they are not persisted in browser storage or the application schema.
 
 ---
