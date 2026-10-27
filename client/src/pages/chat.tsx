@@ -93,6 +93,46 @@ interface GuildEmojisResponse {
   emojis: GuildEmoji[];
 }
 
+interface ChannelMessagesResponse {
+  success: boolean;
+  messages: Message[];
+  hasMore: boolean;
+  error?: string;
+}
+
+const MESSAGE_PAGE_SIZE = 50;
+
+function mergeMessages(...messageGroups: Message[][]): Message[] {
+  const seenMessageIds = new Set<string>();
+
+  return messageGroups.flat().filter(message => {
+    if (seenMessageIds.has(message.id)) {
+      return false;
+    }
+
+    seenMessageIds.add(message.id);
+    return true;
+  });
+}
+
+async function fetchChannelMessages(channelId: string, before?: string): Promise<ChannelMessagesResponse> {
+  const searchParams = new URLSearchParams({ limit: String(MESSAGE_PAGE_SIZE) });
+  if (before) {
+    searchParams.set('before', before);
+  }
+
+  const response = await fetch(`/api/bot/channels/${channelId}/messages?${searchParams}`, {
+    credentials: 'include',
+  });
+  const data = await response.json();
+
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || 'Failed to load messages');
+  }
+
+  return data;
+}
+
 export default function ChatPage() {
   const { isAuthenticated, botId } = useAuth();
   const { toast } = useToast();
@@ -106,11 +146,19 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoadingChannels, setIsLoadingChannels] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesViewportRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const selectionRef = useRef({ start: 0, end: 0 });
+  const shouldScrollToBottomRef = useRef(false);
+  const olderMessagesRequestIdRef = useRef(0);
+  const isLoadingOlderMessagesRef = useRef(false);
+  const activeChannelRef = useRef(selectedChannel);
+  activeChannelRef.current = selectedChannel;
 
   // Fetch guilds
   const { data: guildsData } = useQuery({
@@ -191,43 +239,112 @@ export default function ChatPage() {
 
   // Fetch messages for selected channel
   useEffect(() => {
+    const requestId = ++olderMessagesRequestIdRef.current;
+
     if (!selectedChannel) {
       setMessages([]);
+      setHasMoreMessages(false);
+      setIsLoadingOlderMessages(false);
+      setIsLoadingMessages(false);
+      isLoadingOlderMessagesRef.current = false;
       return;
     }
 
+    let cancelled = false;
     setIsLoadingMessages(true);
-    fetch(`/api/bot/channels/${selectedChannel}/messages`, {
-      credentials: 'include',
-    })
-      .then(res => res.json())
+    setIsLoadingOlderMessages(false);
+    isLoadingOlderMessagesRef.current = false;
+    setHasMoreMessages(false);
+    setMessages([]);
+
+    fetchChannelMessages(selectedChannel)
       .then(data => {
-        if (data.success) {
-          setMessages(data.messages || []);
-        } else {
+        if (!cancelled) {
+          shouldScrollToBottomRef.current = true;
+          setMessages(data.messages);
+          setHasMoreMessages(data.hasMore);
+        }
+      })
+      .catch((error: Error) => {
+        if (!cancelled) {
           toast({
             title: "Error",
-            description: "Failed to load messages",
+            description: error.message || "Failed to load messages",
             variant: "destructive",
           });
         }
       })
-      .catch(() => {
-        toast({
-          title: "Error",
-          description: "Failed to load messages",
-          variant: "destructive",
-        });
-      })
       .finally(() => {
-        setIsLoadingMessages(false);
+        if (!cancelled && requestId === olderMessagesRequestIdRef.current) {
+          setIsLoadingMessages(false);
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [selectedChannel, toast]);
 
-  // Auto scroll to bottom when new messages arrive
+  // Scroll to the newest message only for an initial channel load or after sending.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (shouldScrollToBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      shouldScrollToBottomRef.current = false;
+    }
   }, [messages]);
+
+  const loadOlderMessages = async () => {
+    const channelId = selectedChannel;
+    const before = messages[0]?.id;
+
+    if (!channelId || !before || !hasMoreMessages || isLoadingOlderMessagesRef.current) {
+      return;
+    }
+
+    const requestId = ++olderMessagesRequestIdRef.current;
+    const viewport = messagesViewportRef.current;
+    const previousScrollHeight = viewport?.scrollHeight ?? 0;
+    const previousScrollTop = viewport?.scrollTop ?? 0;
+
+    isLoadingOlderMessagesRef.current = true;
+    setIsLoadingOlderMessages(true);
+
+    try {
+      const data = await fetchChannelMessages(channelId, before);
+      if (requestId !== olderMessagesRequestIdRef.current || activeChannelRef.current !== channelId) {
+        return;
+      }
+
+      setMessages(currentMessages => mergeMessages(data.messages, currentMessages));
+      setHasMoreMessages(data.hasMore);
+
+      requestAnimationFrame(() => {
+        if (activeChannelRef.current === channelId && viewport) {
+          viewport.scrollTop = previousScrollTop + viewport.scrollHeight - previousScrollHeight;
+        }
+      });
+    } catch (error: any) {
+      if (requestId === olderMessagesRequestIdRef.current && activeChannelRef.current === channelId) {
+        toast({
+          title: "Error",
+          description: error.message || "Failed to load older messages",
+          variant: "destructive",
+        });
+      }
+    } finally {
+      if (requestId === olderMessagesRequestIdRef.current) {
+        isLoadingOlderMessagesRef.current = false;
+        setIsLoadingOlderMessages(false);
+      }
+    }
+  };
+
+  const handleMessagesScroll = () => {
+    const viewport = messagesViewportRef.current;
+    if (viewport && viewport.scrollTop < 80) {
+      void loadOlderMessages();
+    }
+  };
 
   // Send message mutation
   const sendMessageMutation = useMutation({
@@ -251,7 +368,7 @@ export default function ChatPage() {
       
       return await response.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       setMessageContent('');
       selectionRef.current = { start: 0, end: 0 };
       toast({
@@ -261,19 +378,17 @@ export default function ChatPage() {
       
       // Refresh messages after sending
       setTimeout(() => {
-        if (selectedChannel) {
-          setIsLoadingMessages(true);
-          fetch(`/api/bot/channels/${selectedChannel}/messages`, {
-            credentials: 'include',
-          })
-            .then(res => res.json())
+        const channelId = variables.channelId;
+        if (activeChannelRef.current === channelId) {
+          fetchChannelMessages(channelId)
             .then(data => {
-              if (data.success) {
-                setMessages(data.messages || []);
+              if (activeChannelRef.current === channelId) {
+                shouldScrollToBottomRef.current = true;
+                setMessages(currentMessages => mergeMessages(currentMessages, data.messages));
               }
             })
-            .finally(() => {
-              setIsLoadingMessages(false);
+            .catch(() => {
+              // The message was sent successfully; a later refresh can recover the timeline.
             });
         }
       }, 1000);
@@ -485,13 +600,22 @@ export default function ChatPage() {
 
           {/* Messages Area */}
           <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full">
+            <ScrollArea
+              className="h-full"
+              viewportRef={messagesViewportRef}
+              onScrollCapture={handleMessagesScroll}
+            >
               <div className="p-4">
                 {selectedChannel ? (
                   isLoadingMessages ? (
                     <div className="text-center text-[#b9bbbe] py-8">Loading messages...</div>
                   ) : (
                     <div className="space-y-4">
+                      {isLoadingOlderMessages && (
+                        <div className="text-center text-sm text-[#b9bbbe] py-2">
+                          Loading older messages...
+                        </div>
+                      )}
                       {messages.length > 0 ? (
                         messages.map((message, index) => {
                           const showAvatar = index === 0 || messages[index - 1]?.author.id !== message.author.id;

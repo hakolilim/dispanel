@@ -253,7 +253,12 @@ export class DiscordBotService {
     }
   }
 
-  async getChannelMessages(botId: string, channelId: string, limit: number = 50): Promise<{ success: boolean; messages?: any[]; error?: string }> {
+  async getChannelMessages(
+    botId: string,
+    channelId: string,
+    limit: number = 50,
+    before?: string,
+  ): Promise<{ success: boolean; messages?: any[]; hasMore?: boolean; error?: string }> {
     try {
       const client = this.clients.get(botId);
       if (!client) {
@@ -265,7 +270,10 @@ export class DiscordBotService {
         return { success: false, error: 'Channel not found or not a text channel' };
       }
 
-      const messages = await channel.messages.fetch({ limit });
+      // Fetch one extra item when possible so the API can report whether another
+      // history page exists without making the client issue an empty request.
+      const fetchLimit = limit < 100 ? limit + 1 : limit;
+      const messages = await channel.messages.fetch({ limit: fetchLimit, before });
       
       const formattedMessages = messages
         .map(message => ({
@@ -317,7 +325,14 @@ export class DiscordBotService {
         }))
         .reverse(); // Reverse to show oldest first
 
-      return { success: true, messages: formattedMessages };
+      const hasMore = messages.size > limit || (limit === 100 && messages.size === limit);
+      // The extra fetched message is the oldest one. Keep it for the next request,
+      // which uses the oldest displayed message as its `before` cursor.
+      const pageMessages = hasMore && messages.size > limit
+        ? formattedMessages.slice(1)
+        : formattedMessages;
+
+      return { success: true, messages: pageMessages, hasMore };
     } catch (error: any) {
       console.error('Get channel messages error:', error);
       return { success: false, error: error.message };

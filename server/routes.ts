@@ -367,15 +367,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const channelIdResult = snowflakeSchema.safeParse(req.params.channelId);
       const limitResult = z.coerce.number().int().min(1).max(100).safeParse(req.query.limit ?? 50);
-      if (!channelIdResult.success || !limitResult.success) {
-        return res.status(400).json({ error: "Invalid channel ID or message limit" });
+      const beforeResult = req.query.before === undefined
+        ? z.undefined().safeParse(undefined)
+        : snowflakeSchema.safeParse(req.query.before);
+      if (!channelIdResult.success || !limitResult.success || !beforeResult.success) {
+        return res.status(400).json({ error: "Invalid channel ID, message limit, or before cursor" });
       }
       const channelId = channelIdResult.data;
       const limit = limitResult.data;
-      const result = await discordService.getChannelMessages(botId, channelId, limit);
+      const before = beforeResult.data;
+      const result = await discordService.getChannelMessages(botId, channelId, limit, before);
       
       if (result.success) {
-        res.json({ success: true, messages: result.messages });
+        res.json({ success: true, messages: result.messages, hasMore: result.hasMore });
       } else {
         res.status(400).json({ error: result.error });
       }
